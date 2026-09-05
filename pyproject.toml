@@ -1,0 +1,17 @@
+[project]
+name = "shipping-label-convert"
+version = "0.1.0"
+description = "Convert shipping labels between ZPL and JSON, with parse errors pinpointed to line and column"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+
+[project.scripts]
+shipping-label-convert = "shipping_label_convert.cli:main"
+
+[tool.setuptools]
+packages = ["shipping_label_convert"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
