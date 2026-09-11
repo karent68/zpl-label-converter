@@ -31,7 +31,7 @@ class Command:
     column: int
 
 
-_KNOWN_COMMANDS = {"XA", "XZ", "FO", "FD", "FS", "FX", "A", "BY", "BC"}
+_KNOWN_COMMANDS = {"XA", "XZ", "FO", "FD", "FS", "FX", "A", "BY", "BC", "GB", "CF"}
 
 
 class _Scanner:

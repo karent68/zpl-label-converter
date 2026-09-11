@@ -90,9 +90,9 @@ package (`pip install .`), the same commands are available as
 ## Supported ZPL commands
 
 `^XA` `^XZ` `^FO` `^FD` `^FS` `^A` (font) `^BY` `^BC` (Code 128
-barcode) `^FX` (comment). This covers a simple text-and-barcode label;
-graphics, other barcode symbologies, and multi-label files aren't
-handled yet.
+barcode) `^GB` (graphic box) `^CF` (default font) `^FX` (comment).
+This covers a simple text-and-barcode label with boxes; other
+barcode symbologies and multi-label files aren't handled yet.
 
 ## Status
 

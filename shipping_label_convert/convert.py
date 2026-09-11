@@ -84,6 +84,51 @@ def zpl_to_label(text: str) -> dict:
                 label["module_width"] = _parse_int(command, parts[0], "module width")
             continue
 
+        if command.name == "GB":
+            _require_open_field(command, current, "^GB (graphic box)")
+            parts = command.args.split(",")
+            if len(parts) < 2 or not parts[0] or not parts[1]:
+                raise ZplError(
+                    "^GB needs a width and height, e.g. ^GB200,200,5",
+                    command.line,
+                    command.column,
+                )
+            current["type"] = "box"
+            current["width"] = _parse_int(command, parts[0], "box width")
+            current["height"] = _parse_int(command, parts[1], "box height")
+            current["thickness"] = (
+                _parse_int(command, parts[2], "box border thickness")
+                if len(parts) >= 3 and parts[2]
+                else 1
+            )
+            if len(parts) >= 4 and parts[3]:
+                if parts[3] not in ("B", "W"):
+                    raise ZplError(
+                        f"expected B or W for box color in ^GB, found {parts[3]!r}",
+                        command.line,
+                        command.column,
+                    )
+                current["color"] = parts[3]
+            if len(parts) >= 5 and parts[4]:
+                current["rounding"] = _parse_int(command, parts[4], "box corner rounding")
+            continue
+
+        if command.name == "CF":
+            parts = command.args.split(",")
+            if not parts or not parts[0]:
+                raise ZplError(
+                    "^CF needs a font, e.g. ^CF0,30,30",
+                    command.line,
+                    command.column,
+                )
+            default_font = {"font": parts[0][:1]}
+            if len(parts) >= 2 and parts[1]:
+                default_font["height"] = _parse_int(command, parts[1], "default font height")
+            if len(parts) >= 3 and parts[2]:
+                default_font["width"] = _parse_int(command, parts[2], "default font width")
+            label["default_font"] = default_font
+            continue
+
         if command.name == "FD":
             _require_open_field(command, current, "^FD (field data)")
             current.setdefault("type", "text")
@@ -97,6 +142,9 @@ def zpl_to_label(text: str) -> dict:
                     command.line,
                     command.column,
                 )
+            if current.get("type", "text") == "text":
+                for key, value in label.get("default_font", {}).items():
+                    current.setdefault(key, value)
             label["fields"].append(current)
             current = None
             continue
@@ -145,15 +193,38 @@ def label_to_zpl(label: dict) -> str:
     if module_width is not None:
         lines.append(f"^BY{module_width}")
 
+    default_font = label.get("default_font")
+    if default_font:
+        parts = [default_font.get("font", "0")]
+        if "height" in default_font:
+            parts.append(str(default_font["height"]))
+            if "width" in default_font:
+                parts.append(str(default_font["width"]))
+        lines.append(f"^CF{','.join(parts)}")
+
     for index, field in enumerate(label.get("fields", [])):
         if "x" not in field or "y" not in field:
             raise ValueError(f"field {index} is missing an x/y position")
         lines.append(f"^FO{field['x']},{field['y']}")
 
-        if field.get("type") == "barcode":
+        field_type = field.get("type")
+        if field_type == "barcode":
             orientation = field.get("orientation", "N")
             height = field.get("height", 100)
             lines.append(f"^BC{orientation},{height}")
+        elif field_type == "box":
+            parts = [
+                str(field.get("width", 1)),
+                str(field.get("height", 1)),
+                str(field.get("thickness", 1)),
+            ]
+            if "color" in field or "rounding" in field:
+                parts.append(field.get("color", "B"))
+            if "rounding" in field:
+                parts.append(str(field["rounding"]))
+            lines.append(f"^GB{','.join(parts)}")
+            lines.append("^FS")
+            continue
         else:
             font = field.get("font", "0")
             orientation = field.get("orientation", "N")
