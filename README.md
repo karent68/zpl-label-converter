@@ -92,7 +92,16 @@ package (`pip install .`), the same commands are available as
 `^XA` `^XZ` `^FO` `^FD` `^FS` `^A` (font) `^BY` `^BC` (Code 128
 barcode) `^GB` (graphic box) `^CF` (default font) `^FX` (comment).
 This covers a simple text-and-barcode label with boxes; other
-barcode symbologies and multi-label files aren't handled yet.
+barcode symbologies aren't handled yet.
+
+## Multiple labels per file
+
+A ZPL file can hold more than one `^XA...^XZ` block back to back - a
+batch of labels printed in one job. A file with a single label still
+converts to a single JSON object, as above. A file with more than one
+label converts to a JSON array of that same object shape, and an
+array converts back to a ZPL file with one `^XA...^XZ` block per
+entry.
 
 ## Status
 

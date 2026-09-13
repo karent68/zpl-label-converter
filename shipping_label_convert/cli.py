@@ -6,7 +6,7 @@ import argparse
 import json
 import sys
 
-from .convert import label_to_zpl, zpl_to_label
+from .convert import label_to_zpl, labels_to_zpl, zpl_to_labels
 from .zpl import ZplError
 
 
@@ -28,16 +28,21 @@ def main(argv=None) -> int:
 
     if args.command == "to-json":
         try:
-            label = zpl_to_label(text)
+            labels = zpl_to_labels(text)
         except ZplError as error:
             print(f"{args.input}:{error}", file=sys.stderr)
             return 1
-        json.dump(label, sys.stdout, indent=2)
+        # A file with one label round-trips as a single JSON object; a
+        # batch of labels round-trips as a JSON array of that same shape.
+        json.dump(labels[0] if len(labels) == 1 else labels, sys.stdout, indent=2)
         sys.stdout.write("\n")
         return 0
 
-    label = json.loads(text)
-    sys.stdout.write(label_to_zpl(label))
+    parsed = json.loads(text)
+    if isinstance(parsed, list):
+        sys.stdout.write(labels_to_zpl(parsed))
+    else:
+        sys.stdout.write(label_to_zpl(parsed))
     return 0
 
 

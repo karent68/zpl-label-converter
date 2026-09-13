@@ -13,6 +13,11 @@ The dict shape is intentionally small:
              "data": "1Z999AA10123456784"},
         ],
     }
+
+A ZPL file may hold more than one ^XA...^XZ block (a batch of labels
+printed together); zpl_to_labels/labels_to_zpl handle that case as a
+list of the dict above, while zpl_to_label/label_to_zpl handle the
+common single-label file.
 """
 
 from __future__ import annotations
@@ -21,26 +26,64 @@ from .zpl import Command, ZplError, tokenize
 
 
 def zpl_to_label(text: str) -> dict:
+    """Parse a ZPL file that holds exactly one ^XA...^XZ label."""
+    labels = _parse_all_labels(text)
+    if len(labels) > 1:
+        _, second_start = labels[1]
+        raise ZplError(
+            f"found {len(labels)} labels in this file; use zpl_to_labels for "
+            "files with more than one ^XA...^XZ block",
+            second_start.line,
+            second_start.column,
+        )
+    return labels[0][0]
+
+
+def zpl_to_labels(text: str) -> list:
+    """Parse a ZPL file that may hold one or more ^XA...^XZ labels."""
+    return [label for label, _ in _parse_all_labels(text)]
+
+
+def _parse_all_labels(text: str) -> list:
     commands = tokenize(text)
-    if not commands or commands[0].name != "XA":
-        line, column = (commands[0].line, commands[0].column) if commands else (1, 1)
-        raise ZplError("a label must start with ^XA", line, column)
-
-    label: dict = {"fields": []}
+    results = []
+    label: dict | None = None
+    label_start: Command | None = None
     current: dict | None = None
-    closed = False
+    field_start: Command | None = None
 
-    for command in commands[1:]:
+    for command in commands:
         if command.name == "XA":
+            if label is not None:
+                raise ZplError(
+                    "^XA found inside a label; close it with ^XZ before "
+                    "starting the next one",
+                    command.line,
+                    command.column,
+                )
+            label = {"fields": []}
+            label_start = command
+            continue
+
+        if label is None:
             raise ZplError(
-                "^XA found inside a label; only one label per document is supported",
+                "expected ^XA to start a label",
                 command.line,
                 command.column,
             )
 
         if command.name == "XZ":
-            closed = True
-            break
+            if current is not None:
+                raise ZplError(
+                    f"field at ({current.get('x')}, {current.get('y')}) "
+                    "was never closed with ^FS",
+                    field_start.line,
+                    field_start.column,
+                )
+            results.append((label, label_start))
+            label = None
+            label_start = None
+            continue
 
         if command.name == "FO":
             parts = command.args.split(",")
@@ -54,6 +97,7 @@ def zpl_to_label(text: str) -> dict:
                 "x": _parse_int(command, parts[0], "x position"),
                 "y": _parse_int(command, parts[1], "y position"),
             }
+            field_start = command
             continue
 
         if command.name == "A":
@@ -152,18 +196,14 @@ def zpl_to_label(text: str) -> dict:
         if command.name == "FX":
             continue  # comment, no visible effect
 
-    if not closed:
+    if label is not None:
         last = commands[-1]
         raise ZplError("label was never closed with ^XZ", last.line, last.column)
 
-    if current is not None:
-        raise ZplError(
-            f"field at ({current.get('x')}, {current.get('y')}) was never closed with ^FS",
-            commands[0].line,
-            commands[0].column,
-        )
+    if not results:
+        raise ZplError("no ^XA...^XZ label found", 1, 1)
 
-    return label
+    return results
 
 
 def _require_open_field(command: Command, current, what: str) -> None:
@@ -241,3 +281,8 @@ def label_to_zpl(label: dict) -> str:
 
     lines.append("^XZ")
     return "\n".join(lines) + "\n"
+
+
+def labels_to_zpl(labels: list) -> str:
+    """Render a batch of labels as one ZPL file, one ^XA...^XZ block per label."""
+    return "".join(label_to_zpl(label) for label in labels)
