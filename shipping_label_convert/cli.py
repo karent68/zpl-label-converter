@@ -6,7 +6,7 @@ import argparse
 import json
 import sys
 
-from .convert import label_to_zpl, labels_to_zpl, zpl_to_labels
+from .convert import LabelError, label_to_zpl, labels_to_zpl, zpl_to_labels
 from .zpl import ZplError
 
 
@@ -39,10 +39,15 @@ def main(argv=None) -> int:
         return 0
 
     parsed = json.loads(text)
-    if isinstance(parsed, list):
-        sys.stdout.write(labels_to_zpl(parsed))
-    else:
-        sys.stdout.write(label_to_zpl(parsed))
+    try:
+        if isinstance(parsed, list):
+            zpl_text = labels_to_zpl(parsed)
+        else:
+            zpl_text = label_to_zpl(parsed)
+    except LabelError as error:
+        print(f"{args.input}:{error}", file=sys.stderr)
+        return 1
+    sys.stdout.write(zpl_text)
     return 0
 
 

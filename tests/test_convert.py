@@ -7,6 +7,7 @@ from __future__ import annotations
 import unittest
 
 from shipping_label_convert.convert import (
+    LabelError,
     label_to_zpl,
     labels_to_zpl,
     zpl_to_label,
@@ -184,14 +185,74 @@ class LabelToZplTests(unittest.TestCase):
         self.assertEqual(zpl_to_label(regenerated), label)
 
     def test_missing_position_is_an_error(self):
-        with self.assertRaises(ValueError) as ctx:
+        with self.assertRaises(LabelError) as ctx:
             label_to_zpl({"fields": [{"data": "hi"}]})
-        self.assertIn("field 0 is missing an x/y position", str(ctx.exception))
+        self.assertEqual(ctx.exception.path, "fields[0].x")
+        self.assertIn("missing x position", str(ctx.exception))
 
     def test_missing_data_is_an_error(self):
-        with self.assertRaises(ValueError) as ctx:
+        with self.assertRaises(LabelError) as ctx:
             label_to_zpl({"fields": [{"x": 1, "y": 1}]})
-        self.assertIn("field 0 is missing its text data", str(ctx.exception))
+        self.assertEqual(ctx.exception.path, "fields[0].data")
+        self.assertIn("missing text data", str(ctx.exception))
+
+    def test_position_must_be_a_whole_number(self):
+        with self.assertRaises(LabelError) as ctx:
+            label_to_zpl({"fields": [{"x": "fifty", "y": 1, "data": "hi"}]})
+        self.assertEqual(ctx.exception.path, "fields[0].x")
+        self.assertIn("expected a whole number, found 'fifty'", str(ctx.exception))
+
+    def test_unknown_field_type_is_an_error(self):
+        with self.assertRaises(LabelError) as ctx:
+            label_to_zpl({"fields": [{"x": 0, "y": 0, "type": "qrcode", "data": "x"}]})
+        self.assertEqual(ctx.exception.path, "fields[0].type")
+        self.assertIn("unknown field type 'qrcode'", str(ctx.exception))
+
+    def test_unsupported_barcode_symbology_is_an_error(self):
+        with self.assertRaises(LabelError) as ctx:
+            label_to_zpl(
+                {
+                    "fields": [
+                        {
+                            "x": 0,
+                            "y": 0,
+                            "type": "barcode",
+                            "symbology": "qr",
+                            "data": "x",
+                        }
+                    ]
+                }
+            )
+        self.assertEqual(ctx.exception.path, "fields[0].symbology")
+        self.assertIn("unsupported barcode symbology 'qr'", str(ctx.exception))
+
+    def test_box_missing_dimensions_is_an_error(self):
+        with self.assertRaises(LabelError) as ctx:
+            label_to_zpl({"fields": [{"x": 0, "y": 0, "type": "box"}]})
+        self.assertEqual(ctx.exception.path, "fields[0].width")
+
+    def test_box_color_must_be_b_or_w(self):
+        with self.assertRaises(LabelError) as ctx:
+            label_to_zpl(
+                {
+                    "fields": [
+                        {"x": 0, "y": 0, "type": "box", "width": 10, "height": 10, "color": "X"}
+                    ]
+                }
+            )
+        self.assertEqual(ctx.exception.path, "fields[0].color")
+        self.assertIn("expected B or W for box color, found 'X'", str(ctx.exception))
+
+    def test_width_without_height_is_an_error(self):
+        with self.assertRaises(LabelError) as ctx:
+            label_to_zpl({"fields": [{"x": 0, "y": 0, "width": 30, "data": "hi"}]})
+        self.assertEqual(ctx.exception.path, "fields[0].height")
+        self.assertIn("width given without a height", str(ctx.exception))
+
+    def test_batch_error_path_names_the_label_index(self):
+        with self.assertRaises(LabelError) as ctx:
+            labels_to_zpl([{"fields": []}, {"fields": [{"data": "hi"}]}])
+        self.assertEqual(ctx.exception.path, "labels[1].fields[0].x")
 
 
 if __name__ == "__main__":

@@ -76,6 +76,15 @@ $ python -m shipping_label_convert.cli to-json broken2.zpl
 broken2.zpl:line 2, column 1: expected a whole number for x position in ^FO, found 'fifty'
 ```
 
+`to-zpl` errors point at the offending value the same way, using a JSON
+path instead of a line and column since the input has no source text
+to point at once it's been parsed:
+
+```
+$ python -m shipping_label_convert.cli to-zpl broken.json
+broken.json:fields[1].x: expected a whole number, found 'fifty'
+```
+
 ## Usage
 
 ```
@@ -105,5 +114,6 @@ entry.
 
 ## Status
 
-Early. The ZPL parser's error messages are the part that's had real
-care put into them; everything else is a first pass.
+Early. Both conversion directions raise errors that point at an exact
+location - line and column for ZPL, a JSON path for the JSON side -
+but nothing else here has had that level of polish yet.

@@ -226,58 +226,167 @@ def _parse_int(command: Command, raw: str, what: str) -> int:
         ) from None
 
 
+class LabelError(ValueError):
+    """A label-to-ZPL conversion error with a JSON path a human can jump
+    straight to, e.g. "fields[1].x: expected a whole number, found 'fifty'".
+    """
+
+    def __init__(self, reason: str, path: str):
+        self.reason = reason
+        self.path = path
+        super().__init__(f"{path}: {reason}")
+
+
+_VALID_FIELD_TYPES = {"text", "barcode", "box"}
+_VALID_ORIENTATIONS = {"N", "R", "I", "B"}
+_VALID_BOX_COLORS = {"B", "W"}
+
+
+def _require_int(value, path: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise LabelError(f"expected a whole number, found {value!r}", path)
+    return value
+
+
+def _require_str(value, path: str) -> str:
+    if not isinstance(value, str):
+        raise LabelError(f"expected a string, found {value!r}", path)
+    return value
+
+
+def _require_orientation(value, path: str) -> str:
+    if value not in _VALID_ORIENTATIONS:
+        raise LabelError(
+            "expected one of N, R, I, B for orientation, found "
+            f"{value!r}",
+            path,
+        )
+    return value
+
+
+def _render_default_font(default_font: dict) -> str:
+    path = "default_font"
+    if "font" not in default_font:
+        raise LabelError("missing a font", f"{path}.font")
+    parts = [_require_str(default_font["font"], f"{path}.font")]
+    if "height" in default_font:
+        parts.append(str(_require_int(default_font["height"], f"{path}.height")))
+        if "width" in default_font:
+            parts.append(str(_require_int(default_font["width"], f"{path}.width")))
+    return f"^CF{','.join(parts)}"
+
+
+def _render_box(field: dict, path: str) -> str:
+    if "width" not in field:
+        raise LabelError("box is missing a width", f"{path}.width")
+    if "height" not in field:
+        raise LabelError("box is missing a height", f"{path}.height")
+    parts = [
+        str(_require_int(field["width"], f"{path}.width")),
+        str(_require_int(field["height"], f"{path}.height")),
+        str(_require_int(field.get("thickness", 1), f"{path}.thickness")),
+    ]
+    if "color" in field or "rounding" in field:
+        color = field.get("color", "B")
+        if color not in _VALID_BOX_COLORS:
+            raise LabelError(
+                f"expected B or W for box color, found {color!r}", f"{path}.color"
+            )
+        parts.append(color)
+    if "rounding" in field:
+        parts.append(str(_require_int(field["rounding"], f"{path}.rounding")))
+    return f"^GB{','.join(parts)}"
+
+
+def _render_barcode(field: dict, path: str) -> str:
+    symbology = field.get("symbology", "code128")
+    if symbology != "code128":
+        raise LabelError(
+            f"unsupported barcode symbology {symbology!r} "
+            "(only 'code128' is supported)",
+            f"{path}.symbology",
+        )
+    orientation = _require_orientation(field.get("orientation", "N"), f"{path}.orientation")
+    height = _require_int(field.get("height", 100), f"{path}.height")
+    return f"^BC{orientation},{height}"
+
+
+def _render_text_font(field: dict, path: str):
+    font = _require_str(field.get("font", "0"), f"{path}.font")
+    orientation = _require_orientation(field.get("orientation", "N"), f"{path}.orientation")
+    height = field.get("height")
+    width = field.get("width")
+    if width is not None and height is None:
+        raise LabelError("width given without a height", f"{path}.height")
+    if height is None:
+        return None
+    height = _require_int(height, f"{path}.height")
+    if width is not None:
+        width = _require_int(width, f"{path}.width")
+        return f"^A{font}{orientation},{height},{width}"
+    return f"^A{font}{orientation},{height}"
+
+
+def _render_field(field, path: str) -> list:
+    if not isinstance(field, dict):
+        raise LabelError(f"expected an object, found {field!r}", path)
+
+    if "x" not in field:
+        raise LabelError("missing x position", f"{path}.x")
+    if "y" not in field:
+        raise LabelError("missing y position", f"{path}.y")
+    x = _require_int(field["x"], f"{path}.x")
+    y = _require_int(field["y"], f"{path}.y")
+
+    field_type = field.get("type", "text")
+    if field_type not in _VALID_FIELD_TYPES:
+        raise LabelError(
+            f"unknown field type {field_type!r} (expected one of "
+            + ", ".join(sorted(_VALID_FIELD_TYPES))
+            + ")",
+            f"{path}.type",
+        )
+
+    lines = [f"^FO{x},{y}"]
+
+    if field_type == "box":
+        lines.append(_render_box(field, path))
+        lines.append("^FS")
+        return lines
+
+    if field_type == "barcode":
+        lines.append(_render_barcode(field, path))
+    else:
+        font_command = _render_text_font(field, path)
+        if font_command is not None:
+            lines.append(font_command)
+
+    if "data" not in field:
+        raise LabelError("missing text data", f"{path}.data")
+    data = _require_str(field["data"], f"{path}.data")
+    lines.append(f"^FD{data}^FS")
+    return lines
+
+
 def label_to_zpl(label: dict) -> str:
+    if not isinstance(label, dict):
+        raise LabelError(f"expected an object, found {label!r}", "$")
+
     lines = ["^XA"]
 
-    module_width = label.get("module_width")
-    if module_width is not None:
-        lines.append(f"^BY{module_width}")
+    if "module_width" in label:
+        lines.append(f"^BY{_require_int(label['module_width'], 'module_width')}")
 
     default_font = label.get("default_font")
     if default_font:
-        parts = [default_font.get("font", "0")]
-        if "height" in default_font:
-            parts.append(str(default_font["height"]))
-            if "width" in default_font:
-                parts.append(str(default_font["width"]))
-        lines.append(f"^CF{','.join(parts)}")
+        lines.append(_render_default_font(default_font))
 
-    for index, field in enumerate(label.get("fields", [])):
-        if "x" not in field or "y" not in field:
-            raise ValueError(f"field {index} is missing an x/y position")
-        lines.append(f"^FO{field['x']},{field['y']}")
+    fields = label.get("fields", [])
+    if not isinstance(fields, list):
+        raise LabelError(f"expected an array, found {fields!r}", "fields")
 
-        field_type = field.get("type")
-        if field_type == "barcode":
-            orientation = field.get("orientation", "N")
-            height = field.get("height", 100)
-            lines.append(f"^BC{orientation},{height}")
-        elif field_type == "box":
-            parts = [
-                str(field.get("width", 1)),
-                str(field.get("height", 1)),
-                str(field.get("thickness", 1)),
-            ]
-            if "color" in field or "rounding" in field:
-                parts.append(field.get("color", "B"))
-            if "rounding" in field:
-                parts.append(str(field["rounding"]))
-            lines.append(f"^GB{','.join(parts)}")
-            lines.append("^FS")
-            continue
-        else:
-            font = field.get("font", "0")
-            orientation = field.get("orientation", "N")
-            height = field.get("height")
-            width = field.get("width")
-            if height is not None and width is not None:
-                lines.append(f"^A{font}{orientation},{height},{width}")
-            elif height is not None:
-                lines.append(f"^A{font}{orientation},{height}")
-
-        if "data" not in field:
-            raise ValueError(f"field {index} is missing its text data")
-        lines.append(f"^FD{field['data']}^FS")
+    for index, field in enumerate(fields):
+        lines.extend(_render_field(field, f"fields[{index}]"))
 
     lines.append("^XZ")
     return "\n".join(lines) + "\n"
@@ -285,4 +394,12 @@ def label_to_zpl(label: dict) -> str:
 
 def labels_to_zpl(labels: list) -> str:
     """Render a batch of labels as one ZPL file, one ^XA...^XZ block per label."""
-    return "".join(label_to_zpl(label) for label in labels)
+    chunks = []
+    for index, label in enumerate(labels):
+        try:
+            chunks.append(label_to_zpl(label))
+        except LabelError as error:
+            prefix = f"labels[{index}]"
+            path = prefix if error.path == "$" else f"{prefix}.{error.path}"
+            raise LabelError(error.reason, path) from None
+    return "".join(chunks)
