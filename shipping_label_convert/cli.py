@@ -7,6 +7,12 @@ import json
 import sys
 
 from .convert import LabelError, label_to_zpl, labels_to_zpl, zpl_to_labels
+from .preview import (
+    DEFAULT_DOTS_PER_COL,
+    DEFAULT_DOTS_PER_ROW,
+    render_preview,
+    render_previews,
+)
 from .zpl import ZplError
 
 
@@ -23,8 +29,38 @@ def main(argv=None) -> int:
     to_zpl = subparsers.add_parser("to-zpl", help="convert a JSON file to ZPL")
     to_zpl.add_argument("input", help="path to a .json file, or - for stdin")
 
+    preview = subparsers.add_parser("preview", help="draw a ZPL file as ascii art")
+    preview.add_argument("input", help="path to a .zpl file, or - for stdin")
+    preview.add_argument(
+        "--dots-per-col",
+        type=int,
+        default=DEFAULT_DOTS_PER_COL,
+        help="printer dots per character column (default: %(default)s)",
+    )
+    preview.add_argument(
+        "--dots-per-row",
+        type=int,
+        default=DEFAULT_DOTS_PER_ROW,
+        help="printer dots per character row (default: %(default)s)",
+    )
+
     args = parser.parse_args(argv)
+    if args.command == "preview" and (args.dots_per_col < 1 or args.dots_per_row < 1):
+        parser.error("--dots-per-col and --dots-per-row must be at least 1")
     text = sys.stdin.read() if args.input == "-" else _read_file(args.input)
+
+    if args.command == "preview":
+        try:
+            labels = zpl_to_labels(text)
+        except ZplError as error:
+            print(f"{args.input}:{error}", file=sys.stderr)
+            return 1
+        sizes = {"dots_per_col": args.dots_per_col, "dots_per_row": args.dots_per_row}
+        if len(labels) == 1:
+            sys.stdout.write(render_preview(labels[0], **sizes))
+        else:
+            sys.stdout.write(render_previews(labels, **sizes))
+        return 0
 
     if args.command == "to-json":
         try:

@@ -96,6 +96,22 @@ Either subcommand accepts `-` to read from stdin. If you install the
 package (`pip install .`), the same commands are available as
 `shipping-label-convert to-json ...`.
 
+## Preview
+
+`preview` draws a ZPL file as ascii art, to check a layout without a
+printer:
+
+```
+$ python -m shipping_label_convert.cli preview label.zpl
+```
+
+One character cell is 8 dots wide and 16 dots tall by default; change
+that with `--dots-per-col` and `--dots-per-row`. Boxes are outlined,
+thin boxes become rule lines, and text starts at its position. It is a
+layout check only: text ignores font size and orientation, and barcode
+bars are a stand-in pattern of the right size, not the real encoding.
+A file with several labels prints each under a header.
+
 ## Supported ZPL commands
 
 `^XA` `^XZ` `^FO` `^FD` `^FS` `^A` (font) `^BY` `^BC` (Code 128
